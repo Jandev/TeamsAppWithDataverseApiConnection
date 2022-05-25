@@ -35,11 +35,14 @@
     public string UserPhotoUri { get; set; }
 
     private readonly string _scope = "User.Read";
+    // Make sure the App Registration within the AAD also has the appropriate API permissions
+    private string dynamicsResource = "https://[thePowerPlatformEnvironment].api.crm4.dynamics.com/";
+    private string dynamicsScope = "user_impersonation";
 
     protected override async Task OnInitializedAsync()
     {
         IsLoading = true;
-        if (await HasPermission(_scope))
+        if (await HasPermission(_scope) && await HasPermission(dynamicsResource + dynamicsScope))
         {
             await ShowProfile();
         }
@@ -61,7 +64,7 @@
     {
         try
         {
-            await teamsUserCredential.LoginAsync(_scope);
+            await teamsUserCredential.LoginAsync(new[] { _scope, dynamicsResource + dynamicsScope });
             NeedConsent = false;
             await ShowProfile();
         }
