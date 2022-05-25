@@ -1,8 +1,10 @@
 ﻿@using System.IO
 @using Azure.Core
 @using Microsoft.Graph
+@using Newtonsoft.Json.Linq
 @inject TeamsFx teamsfx
 @inject TeamsUserCredential teamsUserCredential
+@inject IHttpClientFactory HttpClientFactory
 
 <div>
     <h2>Get the user's profile photo</h2>
@@ -23,6 +25,13 @@
     {
         <ProfileCard IsLoading="false" Profile="@Profile" UserPhotoUri="@UserPhotoUri" />
     }
+
+    <p>
+        Teams user id: <pre>@_teamsUserId</pre>
+    </p>
+    <p>
+        Dynamics user id: <pre>@_dynamicsUserId</pre>
+    </p>
 </div>
 
 @code {
@@ -39,12 +48,16 @@
     private string dynamicsResource = "https://[thePowerPlatformEnvironment].api.crm4.dynamics.com/";
     private string dynamicsScope = "user_impersonation";
 
+    private string _dynamicsUserId;
+    private string _teamsUserId;
+
     protected override async Task OnInitializedAsync()
     {
         IsLoading = true;
         if (await HasPermission(_scope) && await HasPermission(dynamicsResource + dynamicsScope))
         {
             await ShowProfile();
+            await ShowDynamicsUserId();
         }
     }
 
@@ -55,9 +68,38 @@
 
         Profile = await graph.Me.Request().GetAsync();
         UserPhotoUri = await GetPhotoAsync(graph);
+        _teamsUserId = (await graph.Me.Request().GetAsync()).Id;
 
         IsLoading = false;
         ErrorMessage = string.Empty;
+    }
+
+    private async Task ShowDynamicsUserId()
+    {
+        try
+        {
+            var dynamicsToken = (await teamsUserCredential.GetTokenAsync(new TokenRequestContext(new string[] { dynamicsResource + dynamicsScope}), new System.Threading.CancellationToken())).Token;
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", dynamicsToken);
+            var whoAmIResponse = await httpClient.GetAsync(dynamicsResource + "/api/data/v9.2/WhoAmI");
+
+            if (whoAmIResponse.IsSuccessStatusCode)
+            {
+                JObject body = JObject.Parse(whoAmIResponse.Content.ReadAsStringAsync().Result);
+                Guid userId = (Guid)body["UserId"];
+
+                _dynamicsUserId = userId.ToString("D");
+            }
+            else
+            {
+                ErrorMessage += "Web API call failed";
+                ErrorMessage += "Reason: " + whoAmIResponse.ReasonPhrase;
+            }
+        }
+        catch (ExceptionWithCode e)
+        {
+            ErrorMessage = e.Message;
+        }
     }
 
     private async Task ConsentAndShow()
@@ -67,6 +109,7 @@
             await teamsUserCredential.LoginAsync(new[] { _scope, dynamicsResource + dynamicsScope });
             NeedConsent = false;
             await ShowProfile();
+            await ShowDynamicsUserId();
         }
         catch (ExceptionWithCode e)
         {
