@@ -2,6 +2,7 @@
 @using Azure.Core
 @using Microsoft.Graph
 @using Newtonsoft.Json.Linq
+@using System.Text.Json
 @inject TeamsFx teamsfx
 @inject TeamsUserCredential teamsUserCredential
 @inject IHttpClientFactory HttpClientFactory
@@ -32,6 +33,34 @@
     <p>
         Dynamics user id: <pre>@_dynamicsUserId</pre>
     </p>
+    <p>Get data from Dataverse!</p>
+    <pre>[[apiUrlOfYourPowerPlatformEnvironment]]/accounts?$select=name,revenue&$orderby=revenue desc&$top=3</pre>
+    <FluentButton Appearance="Appearance.Accent" Disabled="@IsLoading" @onclick="LoadDataverseData">Load data</FluentButton>
+    <table>
+        <thead>
+            <tr>
+                <td>
+                    Name
+                </td>
+                <td>
+                    Revenue
+                </td>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var account in _accountCollection)
+        {
+            <tr>
+                <td>
+                    @account.name
+                </td>
+                <td>
+                    @account.revenue
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
 </div>
 
 @code {
@@ -50,6 +79,7 @@
 
     private string _dynamicsUserId;
     private string _teamsUserId;
+    private List<Models.Dataverse.Accounts.WithRevenue.Value> _accountCollection = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -99,6 +129,27 @@
         catch (ExceptionWithCode e)
         {
             ErrorMessage = e.Message;
+        }
+    }
+
+    private async Task LoadDataverseData()
+    {
+        var dynamicsToken = (await teamsUserCredential.GetTokenAsync(new TokenRequestContext(new string[] { dynamicsResource + dynamicsScope}), new System.Threading.CancellationToken())).Token;
+        var httpClient = HttpClientFactory.CreateClient();
+        httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", dynamicsToken);
+        var accountsResponse = await httpClient.GetAsync(dynamicsResource + "/api/data/v9.2/accounts?$select=name,revenue&$orderby=revenue desc&$top=3");
+
+        if (accountsResponse.IsSuccessStatusCode)
+        {
+            var topAccountsWithRevenue = await JsonSerializer.DeserializeAsync<Models.Dataverse.Accounts.WithRevenue.Rootobject>(
+                                            await accountsResponse.Content.ReadAsStreamAsync());
+            _accountCollection.Clear();
+            _accountCollection.AddRange(topAccountsWithRevenue.value);
+        }
+        else
+        {
+            ErrorMessage += "Web API call failed";
+            ErrorMessage += "Reason: " + accountsResponse.ReasonPhrase;
         }
     }
 
